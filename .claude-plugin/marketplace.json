@@ -1,0 +1,14 @@
+{
+  "name": "veil",
+  "owner": { "name": "Yann" },
+  "metadata": {
+    "description": "Veil: one local privacy layer for every AI tool."
+  },
+  "plugins": [
+    {
+      "name": "veil",
+      "source": "./packages/claude-code",
+      "description": "Hides secrets and personal data from Claude Code: masks what tools return, puts real values back when files are written or commands run, and stops typed prompts that contain secrets."
+    }
+  ]
+}

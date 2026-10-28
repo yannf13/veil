@@ -6,9 +6,10 @@ One local privacy layer for every AI tool. Veil masks secrets and personal data 
 | --- | --- | --- |
 | [`packages/engine`](packages/engine) | Detection, masking and restoring; zero dependencies | v0.1, 61 tests |
 | [`packages/extension`](packages/extension) | Chrome extension for ChatGPT, Claude and Gemini; real values shown only in frames the site can't read, plus a Veil window with Copy buttons | v0.3, 22 end-to-end tests in Chromium; [install](packages/extension/README.md) |
-| Coding-agent plugin | Claude Code, then Codex, Cursor, Gemini CLI | Next |
+| [`packages/claude-code`](packages/claude-code) | Claude Code plugin: masks what tools return, restores values when files are written or commands run, blocks typed prompts with secrets | v0.1, 11 unit tests + runs in real Claude Code; install with `/plugin marketplace add yannf13/veil` |
+| Other coding agents | Codex, Cursor, Gemini CLI | Next |
 
-**Claude Code hooks, checked in version 2.1.312 (Oct 2026):** a `UserPromptSubmit` hook can block a typed prompt but cannot rewrite it (`suppressOriginalPrompt` only hides the original from the block message). Tool hooks can rewrite: `PostToolUse` → `updatedToolOutput` replaces what the agent reads from any tool (it must match that tool's output shape, or the original is used), and `PreToolUse` → `updatedInput` changes tool input before it runs. So the plugin will mask what the agent reads, swap placeholders back before files are written, and block typed prompts that contain secrets.
+**Claude Code hooks, checked in version 2.1.312 (Oct 2026):** a `UserPromptSubmit` hook can block a typed prompt but cannot rewrite it. Tool hooks can rewrite: `PostToolUse` → `updatedToolOutput` replaces what the agent reads from any tool (same shape as the tool's output), and `PreToolUse` → `updatedInput` changes tool input before it runs. Details and the limits found in real runs are in the [plugin README](packages/claude-code/README.md).
 
 ## packages/engine
 

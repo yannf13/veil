@@ -1,0 +1,8 @@
+{
+  "name": "veil",
+  "version": "0.1.0",
+  "description": "Hides secrets and personal data from the agent: masks what tools return, puts real values back when files are written or commands run, and stops typed prompts that contain secrets. Everything stays on your machine.",
+  "author": { "name": "Yann" },
+  "repository": "https://github.com/yannf13/veil",
+  "license": "MIT"
+}
