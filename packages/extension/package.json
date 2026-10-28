@@ -1,0 +1,31 @@
+{
+  "name": "@veil/extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome extension: masks secrets and personal data before they reach ChatGPT, Claude or Gemini, and restores them in the answers.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node build.mjs && vitest run"
+  },
+  "dependencies": {
+    "@veil/engine": "*"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "@types/node": "^22.20.5",
+    "esbuild": "^0.24.0",
+    "playwright": "1.63.0",
+    "prosemirror-commands": "^1.6.0",
+    "prosemirror-keymap": "^1.2.2",
+    "prosemirror-model": "^1.23.0",
+    "prosemirror-schema-basic": "^1.2.3",
+    "prosemirror-state": "^1.4.3",
+    "prosemirror-view": "^1.34.0",
+    "quill": "^2.0.3",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "license": "MIT"
+}

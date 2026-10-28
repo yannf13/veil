@@ -1,0 +1,28 @@
+// Bundles the extension into dist/, ready for chrome://extensions → "Load unpacked".
+import { build } from 'esbuild';
+import { copyFile, mkdir, rm } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const dist = resolve(here, 'dist');
+
+await rm(dist, { recursive: true, force: true });
+await mkdir(dist, { recursive: true });
+
+const common = {
+  bundle: true,
+  format: 'iife',
+  target: 'chrome120',
+  platform: 'browser',
+  legalComments: 'none',
+  // Bundle the engine from source so the extension never depends on a stale engine build.
+  alias: { '@veil/engine': resolve(here, '../engine/src/index.ts') },
+  logLevel: 'warning',
+};
+
+await build({ ...common, entryPoints: [resolve(here, 'src/content.ts')], outfile: resolve(dist, 'content.js') });
+await build({ ...common, entryPoints: [resolve(here, 'src/background.ts')], outfile: resolve(dist, 'background.js') });
+await copyFile(resolve(here, 'manifest.json'), resolve(dist, 'manifest.json'));
+
+console.log(`Built extension in ${dist}`);

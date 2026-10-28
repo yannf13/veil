@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Veil",
+  "version": "0.1.0",
+  "description": "Hides secrets and personal data from ChatGPT, Claude and Gemini, and shows them back to you in the answers. Everything stays on your device.",
+  "permissions": ["storage"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*", "https://claude.ai/*", "https://gemini.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Veil is protecting ChatGPT, Claude and Gemini"
+  }
+}
