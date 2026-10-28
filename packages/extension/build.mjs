@@ -23,6 +23,8 @@ const common = {
 
 await build({ ...common, entryPoints: [resolve(here, 'src/content.ts')], outfile: resolve(dist, 'content.js') });
 await build({ ...common, entryPoints: [resolve(here, 'src/background.ts')], outfile: resolve(dist, 'background.js') });
+await build({ ...common, entryPoints: [resolve(here, 'src/overlay.ts')], outfile: resolve(dist, 'overlay.js') });
 await copyFile(resolve(here, 'manifest.json'), resolve(dist, 'manifest.json'));
+await copyFile(resolve(here, 'src/overlay.html'), resolve(dist, 'overlay.html'));
 
 console.log(`Built extension in ${dist}`);

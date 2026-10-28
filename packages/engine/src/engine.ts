@@ -119,10 +119,26 @@ export function mask(text: string, options: MaskOptions = {}): MaskResult {
  */
 const PLACEHOLDER = /\\?\[([A-Z]+(?:\\?_[A-Z]+)*)\\?_(\d+)\\?\]/g;
 
+const normalize = (type: string, n: string): string => `[${type.replace(/\\/g, '')}_${n}]`;
+
 /** Puts the real values back. Placeholders the vault doesn't know are left untouched. */
 export function restore(text: string, vault: Vault): string {
-  return text.replace(PLACEHOLDER, (match, type: string, n: string) => {
-    const value = vault.valueOf(`[${type.replace(/\\/g, '')}_${n}]`);
-    return value ?? match;
-  });
+  return text.replace(PLACEHOLDER, (match, type: string, n: string) => vault.valueOf(normalize(type, n)) ?? match);
+}
+
+export interface PlaceholderMatch {
+  /** Offset of the placeholder as written in the text, escapes included. */
+  start: number;
+  end: number;
+  /** Canonical form, e.g. "[EMAIL_1]" for both "[EMAIL_1]" and "\[EMAIL\_1\]". */
+  placeholder: string;
+}
+
+/** Where placeholders appear in a text, for displays that show values without editing the text. */
+export function findPlaceholders(text: string): PlaceholderMatch[] {
+  return [...text.matchAll(PLACEHOLDER)].map((m) => ({
+    start: m.index ?? 0,
+    end: (m.index ?? 0) + m[0].length,
+    placeholder: normalize(m[1] ?? '', m[2] ?? ''),
+  }));
 }

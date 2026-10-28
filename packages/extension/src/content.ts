@@ -1,6 +1,7 @@
-import { detect, restore, Vault } from '@veil/engine';
+import { detect, Vault } from '@veil/engine';
 import type { EntityType, Finding } from '@veil/engine';
 import { isTextField, linearize, rangeFor, readText } from './dom-text';
+import { Reveal } from './reveal';
 import { composerOf, findComposer, isSendButton, siteFor } from './sites';
 import type { Site } from './sites';
 import { hideNotice, isNotice, showNotice } from './toast';
@@ -13,8 +14,9 @@ import { loadVault, onVaultChange, saveVault } from './vault-store';
  * 2. Something sensitive: Veil stops the send, replaces each value with a placeholder such as
  *    [EMAIL_1] right in the box, and asks you to look and send again. You always see exactly
  *    what leaves your device. If a value can't be replaced, nothing is sent.
- * 3. Placeholders that show up on the page (your sent message, the AI's answer) are swapped
- *    back to the real values on your screen only. Message boxes are never restored.
+ * 3. Placeholders on the page (your sent message, the AI's answer) stay placeholders in the page.
+ *    The real values are drawn over them by a frame the site can't read (see reveal.ts).
+ *    Real values are never written into the page, and message boxes are never touched.
  */
 
 const host = location.hostname;
@@ -24,14 +26,16 @@ if (site) start(site);
 function start(site: Site): void {
   let vault = new Vault();
   let busy = false;
+  const reveal = new Reveal(host, () => vault, (node) => isInEditable(node) || isNotice(node));
+  reveal.start();
 
   void loadVault(host).then((v) => {
     vault = v;
-    restoreAll();
+    reveal.invalidate();
   });
   onVaultChange(host, (v) => {
     vault = v;
-    restoreAll();
+    reveal.invalidate();
   });
 
   // Capture phase on document: runs before the editor's and the site's own handlers.
@@ -132,31 +136,12 @@ function start(site: Site): void {
     return detect(readText(composer)).length === 0;
   }
 
-  // ---- Restoring placeholders on screen -----------------------------------
-
-  let scheduled = false;
-  new MutationObserver(() => {
-    if (scheduled) return;
-    scheduled = true;
-    setTimeout(() => {
-      scheduled = false;
-      restoreAll();
-    }, 50);
-  }).observe(document.documentElement, { subtree: true, childList: true, characterData: true });
-
-  function restoreAll(): void {
-    if (vault.size === 0 || !document.body) return;
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    const changes: Array<[Text, string]> = [];
-    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      const t = n as Text;
-      if (!t.data.includes('[') || isInEditable(t) || isNotice(t)) continue;
-      const restored = restore(t.data, vault);
-      if (restored !== t.data) changes.push([t, restored]);
-    }
-    // Text only, no new elements: the site's framework keeps working on the same nodes.
-    for (const [t, value] of changes) t.data = value;
-  }
+  // Any change to the page's text may add, move or remove placeholders.
+  new MutationObserver(() => reveal.invalidate()).observe(document.documentElement, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+  });
 }
 
 function isInEditable(node: Node): boolean {

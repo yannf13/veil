@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Vault, mask, restore } from '../src/index.js';
+import { Vault, findPlaceholders, mask, restore } from '../src/index.js';
 import { fakeToken } from './helpers.js';
 
 const key = 'sk-proj-' + fakeToken(40);
@@ -60,6 +60,17 @@ describe('restore', () => {
   it('leaves unknown placeholders untouched', () => {
     const { vault } = mask(message);
     expect(restore('See [EMAIL_9] and [NOTE_1]', vault)).toBe('See [EMAIL_9] and [NOTE_1]');
+  });
+});
+
+describe('findPlaceholders', () => {
+  it('locates plain and escaped placeholders and normalizes them', () => {
+    const text = 'Mail [EMAIL_1], key \\[API\\_KEY\\_2\\] and [NOTE].';
+    expect(findPlaceholders(text)).toEqual([
+      { start: 5, end: 14, placeholder: '[EMAIL_1]' },
+      { start: 20, end: 35, placeholder: '[API_KEY_2]' },
+    ]);
+    expect(text.slice(20, 35)).toBe('\\[API\\_KEY\\_2\\]');
   });
 });
 

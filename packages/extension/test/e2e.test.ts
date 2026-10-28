@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import type { BrowserContext, Page } from 'playwright';
+import type { BrowserContext, Frame, Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -50,7 +50,9 @@ beforeAll(async () => {
   });
   if (context.serviceWorkers().length === 0) await context.waitForEvent('serviceworker');
 
-  await context.route('**/*', (route) => {
+  // Serve the three sites from local files; leave everything else (Veil's own frame) alone.
+  const hosts = new Set(SITES.map((s) => new URL(s.url).hostname));
+  await context.route((url) => hosts.has(url.hostname), (route) => {
     const site = SITES.find((s) => s.url === route.request().url());
     if (!site || route.request().resourceType() !== 'document') return route.abort();
     return route.fulfill({
@@ -77,9 +79,60 @@ const sent = (page: Page) => page.evaluate(() => window.__fixture.sent);
 const composerText = (page: Page) => page.evaluate(() => window.__fixture.getText());
 const conversation = (page: Page) => page.locator('#messages').innerText();
 
+/** Everything the site's own scripts could read: all text and markup of the page. */
+const pageContent = (page: Page) =>
+  page.evaluate(() => document.documentElement.innerText + document.documentElement.outerHTML);
+
+/** Veil's overlay frame (on the extension's origin). The test reads it through the browser's debugger. */
+async function overlay(page: Page): Promise<Frame> {
+  await expect.poll(() => page.frames().some((f) => f.url().includes('/overlay.html'))).toBe(true);
+  return page.frames().find((f) => f.url().includes('/overlay.html'))!;
+}
+
+interface ChipBox {
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+const shownValues = (frame: Frame): Promise<ChipBox[]> =>
+  frame.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('#chips > span')]
+      .filter((s) => !s.hidden)
+      .map((s) => {
+        const r = s.getBoundingClientRect();
+        return { text: s.textContent ?? '', x: r.x, y: r.y, w: r.width, h: r.height };
+      }),
+  );
+
+/** Where a placeholder (with its padding) sits in the page, in viewport coordinates. */
+const placeholderBox = (page: Page, placeholder: string, within: string) =>
+  page.evaluate(
+    ([ph, sel]) => {
+      const root = document.querySelector(sel!)!;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const t = n as Text;
+        const i = t.data.indexOf(ph!);
+        if (i < 0) continue;
+        let end = i + ph!.length;
+        while (t.data[end] === ' ' || t.data[end] === ' ') end++;
+        const range = document.createRange();
+        range.setStart(t, i);
+        range.setEnd(t, end);
+        const r = range.getClientRects()[0]!;
+        return { x: r.x, y: r.y, w: r.width, h: r.height };
+      }
+      return null;
+    },
+    [placeholder, within],
+  );
+
 for (const site of SITES) {
   describe(site.name, () => {
-    it('masks on Enter, sends only placeholders, and shows the real values back', async () => {
+    it('masks on Enter, sends only placeholders, and shows real values only in its own frame', async () => {
       const page = await open(site);
       await page.keyboard.type(`Email ${EMAIL} or call ${PHONE}.`);
       await page.keyboard.press('Shift+Enter');
@@ -102,10 +155,18 @@ for (const site of SITES) {
       for (const secret of [EMAIL, PHONE, KEY]) expect(message).not.toContain(secret);
       expect(message).toContain('[EMAIL_1]');
 
-      await expect.poll(() => conversation(page)).toContain(`You wrote: Email ${EMAIL}`);
-      const shown = await conversation(page);
-      expect(shown).toContain(KEY);
-      expect(shown).not.toContain('[EMAIL_1]');
+      // The page keeps the placeholders; no real value is anywhere its scripts could read.
+      await expect.poll(() => conversation(page)).toContain('You wrote: Email [EMAIL_1]');
+      const content = await pageContent(page);
+      for (const secret of [EMAIL, PHONE, KEY]) expect(content).not.toContain(secret);
+      // The page can't look inside Veil's frame either.
+      expect(await page.evaluate(() => document.querySelector('iframe')?.contentDocument ?? 'no access')).toBe('no access');
+
+      // Veil's frame shows every value, in the user's message and in the answer.
+      const frame = await overlay(page);
+      await expect.poll(async () => (await shownValues(frame)).map((c) => c.text).sort()).toEqual(
+        [EMAIL, EMAIL, KEY, KEY, PHONE, PHONE].sort(),
+      );
       await page.close();
     });
 
@@ -154,5 +215,79 @@ describe('across tabs', () => {
     expect(text).not.toContain(`and ${placeholder}`);
     await first.close();
     await second.close();
+  });
+});
+
+describe('protected display', () => {
+  async function conversationWithEmail(): Promise<{ page: Page; frame: Frame }> {
+    const page = await open(SITES[0]);
+    await page.keyboard.type(`Please write to ${EMAIL} today.`);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(300);
+    await page.keyboard.press('Enter');
+    await expect.poll(() => conversation(page)).toContain('You wrote:');
+    const frame = await overlay(page);
+    await expect.poll(async () => (await shownValues(frame)).length).toBe(2);
+    return { page, frame };
+  }
+
+  /** The value drawn over the placeholder in the assistant's answer, if any. */
+  async function answerChip(page: Page, frame: Frame) {
+    const target = await placeholderBox(page, '[EMAIL_1]', '#messages .assistant');
+    const chips = await shownValues(frame);
+    const chip = chips.find((c) => target && Math.abs(c.x - target.x) < 1 && Math.abs(c.y - target.y) < 1);
+    return { target, chip };
+  }
+
+  it('draws the value exactly over its placeholder, with room reserved for it', async () => {
+    const { page, frame } = await conversationWithEmail();
+    const { target, chip } = await answerChip(page, frame);
+    expect(chip?.text).toBe(EMAIL);
+    expect(Math.abs(chip!.w - target!.w)).toBeLessThan(1);
+    expect(Math.abs(chip!.h - target!.h)).toBeLessThan(1);
+    // The placeholder was padded to roughly the value's width, so the value isn't squeezed.
+    const valueWidth = await page.evaluate((v) => {
+      const c = document.createElement('canvas').getContext('2d')!;
+      c.font = getComputedStyle(document.querySelector('#messages .assistant p')!).font;
+      return c.measureText(v).width;
+    }, EMAIL);
+    expect(target!.w).toBeGreaterThanOrEqual(valueWidth);
+    await page.close();
+  });
+
+  it('follows the text when the page scrolls', async () => {
+    const { page, frame } = await conversationWithEmail();
+    await page.evaluate(() => {
+      document.body.style.paddingBottom = '2000px';
+      window.scrollTo(0, 37);
+    });
+    await expect.poll(async () => {
+      const { target, chip } = await answerChip(page, frame);
+      return Boolean(target && chip && chip.text === EMAIL);
+    }).toBe(true);
+    await page.close();
+  });
+
+  it('hides values when something covers them, and shows them again after', async () => {
+    const { page, frame } = await conversationWithEmail();
+    await page.evaluate(() => {
+      const cover = document.createElement('div');
+      cover.id = 'cover';
+      cover.style.cssText = 'position:fixed;inset:0;background:#fff;z-index:10';
+      document.body.append(cover);
+    });
+    await expect.poll(async () => (await shownValues(frame)).length).toBe(0);
+    await page.evaluate(() => document.getElementById('cover')!.remove());
+    await expect.poll(async () => (await shownValues(frame)).length).toBe(2);
+    await page.close();
+  });
+
+  it('never pads or changes the message box', async () => {
+    const { page } = await conversationWithEmail();
+    await page.locator(SITES[0].composer).click();
+    await page.keyboard.type('Reply to [EMAIL_1] please');
+    await page.waitForTimeout(300);
+    expect(await composerText(page)).toBe('Reply to [EMAIL_1] please');
+    await page.close();
   });
 });

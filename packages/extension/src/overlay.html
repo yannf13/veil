@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <!-- Must match the color-scheme set on the iframe element, or Chrome paints the frame opaque. -->
+    <meta name="color-scheme" content="light" />
+    <style>
+      :root { color-scheme: light; }
+      html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+      #chips > span {
+        position: absolute;
+        box-sizing: border-box;
+        white-space: pre;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        /* A quiet cue that this value is shown by Veil, on this screen only. */
+        text-decoration: underline dotted;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="chips"></div>
+    <script src="overlay.js"></script>
+  </body>
+</html>
