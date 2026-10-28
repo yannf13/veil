@@ -25,6 +25,18 @@ export interface ChipsMessage {
   chips: Chip[];
 }
 
+/** Content script → Veil window: which placeholders are on the page, in order. Names only, never values. */
+export interface PanelMessage {
+  type: 'veil:panel';
+  placeholders: string[];
+}
+
+/** Veil window → content script: how tall the window wants to be. Size only. */
+export interface PanelSizeMessage {
+  type: 'veil:panel-size';
+  height: number;
+}
+
 export const SITE_ORIGINS = ['https://chatgpt.com', 'https://claude.ai', 'https://gemini.google.com'];
 
 export const vaultKey = (host: string): string => `vault:${host}`;

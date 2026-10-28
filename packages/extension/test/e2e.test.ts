@@ -291,3 +291,94 @@ describe('protected display', () => {
     await page.close();
   });
 });
+
+describe('Veil window', () => {
+  async function veilWindow(page: Page): Promise<Frame> {
+    await expect.poll(() => page.frames().some((f) => f.url().includes('/panel.html'))).toBe(true);
+    return page.frames().find((f) => f.url().includes('/panel.html'))!;
+  }
+  const rows = (frame: Frame) =>
+    frame.evaluate(() =>
+      [...document.querySelectorAll('li')].map((li) => [
+        li.querySelector('code')?.textContent ?? '',
+        li.querySelector('.value')?.textContent ?? '',
+      ]),
+    );
+  /** Height of the Veil window as the user sees it: 0 while it is hidden (transparent and click-through). */
+  const windowHeight = (page: Page) =>
+    page.evaluate(() => {
+      const f = document.querySelector<HTMLIFrameElement>('iframe[title="Veil"]');
+      return !f || getComputedStyle(f).opacity === '0' ? 0 : f.getBoundingClientRect().height;
+    });
+
+  it('lists the hidden values as soon as the message is masked, before sending', async () => {
+    const page = await open(SITES[0]);
+    await page.keyboard.type(`Mail ${EMAIL}, call ${PHONE}`);
+    await page.keyboard.press('Enter');
+    const frame = await veilWindow(page);
+    await expect.poll(() => rows(frame)).toEqual([
+      ['[EMAIL_1]', EMAIL],
+      ['[PHONE_1]', PHONE],
+    ]);
+    await expect.poll(() => windowHeight(page)).toBeGreaterThan(40);
+    // The page can't read the window.
+    expect(await page.evaluate(() => document.querySelector<HTMLIFrameElement>('iframe[title="Veil"]')?.contentDocument ?? 'no access')).toBe('no access');
+    expect(await pageContent(page)).not.toContain(EMAIL);
+    await page.close();
+  });
+
+  it('copies a value to the clipboard', async () => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'https://chatgpt.com' });
+    const page = await open(SITES[0]);
+    await page.keyboard.type(`Key: ${KEY}`);
+    await page.keyboard.press('Enter');
+    const frame = await veilWindow(page);
+    await expect.poll(() => rows(frame)).toEqual([['[API_KEY_1]', KEY]]);
+    const copy = frame.locator('li button').first(); // by position: its label changes to "Copied"
+    await copy.click();
+    await expect.poll(() => copy.textContent()).toBe('Copied');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(KEY);
+    await page.close();
+  });
+
+  it('minimizes to a small pill and opens again', async () => {
+    const page = await open(SITES[0]);
+    await page.keyboard.type(`Mail ${EMAIL}`);
+    await page.keyboard.press('Enter');
+    const frame = await veilWindow(page);
+    await expect.poll(() => windowHeight(page)).toBeGreaterThan(40);
+    await frame.getByRole('button', { name: 'Hide' }).click();
+    await expect.poll(() => frame.getByRole('button', { name: /Veil · 1 hidden value/ }).isVisible()).toBe(true);
+    await expect.poll(() => windowHeight(page)).toBeLessThan(45);
+    await frame.getByRole('button', { name: /Veil · 1 hidden value/ }).click();
+    await expect.poll(() => rows(frame)).toEqual([['[EMAIL_1]', EMAIL]]);
+    await page.close();
+  });
+
+  it('never covers the message box or its send button', async () => {
+    const page = await open(SITES[0]);
+    // Like ChatGPT: the message box pinned to the bottom, in a short window, right where the Veil window would go.
+    await page.setViewportSize({ width: 900, height: 260 });
+    await page.addStyleTag({ content: 'form { position: fixed; left: 0; right: 0; bottom: 0; height: 120px; background: #eee; }' });
+    await page.keyboard.type(`Mail ${EMAIL}`);
+    await page.keyboard.press('Enter');
+    await expect.poll(() => windowHeight(page)).toBeGreaterThan(40);
+    await page.waitForTimeout(600); // the window re-places itself every 500 ms
+    const overlap = await page.evaluate(() => {
+      const a = document.querySelector('iframe[title="Veil"]')!.getBoundingClientRect();
+      const b = document.querySelector('form')!.getBoundingClientRect();
+      return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    });
+    expect(overlap).toBe(false);
+    await page.close();
+  });
+
+  it('stays out of the way on pages without hidden values', async () => {
+    const page = await open(SITES[0]);
+    await page.keyboard.type('Just a normal question');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(400);
+    expect(await windowHeight(page)).toBe(0);
+    await page.close();
+  });
+});

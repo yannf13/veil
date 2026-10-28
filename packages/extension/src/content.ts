@@ -1,6 +1,7 @@
 import { detect, Vault } from '@veil/engine';
 import type { EntityType, Finding } from '@veil/engine';
 import { isTextField, linearize, rangeFor, readText } from './dom-text';
+import { PanelHost } from './panel-host';
 import { Reveal } from './reveal';
 import { composerOf, findComposer, isSendButton, siteFor } from './sites';
 import type { Site } from './sites';
@@ -15,7 +16,8 @@ import { loadVault, onVaultChange, saveVault } from './vault-store';
  *    [EMAIL_1] right in the box, and asks you to look and send again. You always see exactly
  *    what leaves your device. If a value can't be replaced, nothing is sent.
  * 3. Placeholders on the page (your sent message, the AI's answer) stay placeholders in the page.
- *    The real values are drawn over them by a frame the site can't read (see reveal.ts).
+ *    The real values are drawn over them by a frame the site can't read (see reveal.ts), and
+ *    listed with Copy buttons in the Veil window, another such frame (see panel-host.ts).
  *    Real values are never written into the page, and message boxes are never touched.
  */
 
@@ -26,7 +28,16 @@ if (site) start(site);
 function start(site: Site): void {
   let vault = new Vault();
   let busy = false;
-  const reveal = new Reveal(host, () => vault, (node) => isInEditable(node) || isNotice(node));
+  const panel = new PanelHost(host, () => {
+    const composer = findComposer(site);
+    return (composer?.closest('form') ?? composer)?.getBoundingClientRect() ?? null;
+  });
+  const reveal = new Reveal(
+    host,
+    () => vault,
+    (node) => isInEditable(node) || isNotice(node),
+    (placeholders) => panel.show(placeholders),
+  );
   reveal.start();
 
   void loadVault(host).then((v) => {
@@ -90,6 +101,7 @@ function start(site: Site): void {
     const masked: Finding[] = [];
     const ok = isTextField(composer) ? maskTextField(composer, masked) : await maskEditable(composer, masked);
     if (masked.length > 0) await saveVault(host, vault);
+    reveal.invalidate(); // a textarea's new value changes no DOM node, so tell the window directly
     const left = detect(readText(composer)).length;
     if (!ok || left > 0) {
       showNotice(

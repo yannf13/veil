@@ -34,7 +34,10 @@ export class Reveal {
   constructor(
     private readonly host: string,
     private readonly getVault: () => Vault,
+    /** Text Veil must not draw over or pad, such as message boxes. */
     private readonly skip: (node: Node) => boolean,
+    /** Told which known placeholders are on the page (message boxes included), in order. */
+    private readonly onPresent: (placeholders: string[]) => void = () => {},
   ) {}
 
   start(): void {
@@ -64,23 +67,32 @@ export class Reveal {
     const vault = this.getVault();
     if (this.dirty) {
       this.dirty = false;
-      this.nodes = vault.size > 0 ? this.scan() : [];
+      const { draw, present } = vault.size > 0 ? this.scan(vault) : { draw: [], present: [] };
+      this.nodes = draw;
       for (const node of this.nodes) this.pad(node, vault);
+      this.onPresent(present);
     }
     const chips: Chip[] = [];
     for (const node of this.nodes) this.collect(node, vault, chips);
     this.send(chips);
   }
 
-  private scan(): Text[] {
-    const found: Text[] = [];
-    if (!document.body) return found;
+  private scan(vault: Vault): { draw: Text[]; present: string[] } {
+    const draw: Text[] = [];
+    const present = new Set<string>();
+    const note = (text: string): void => {
+      for (const m of findPlaceholders(text)) if (vault.valueOf(m.placeholder)) present.add(m.placeholder);
+    };
+    if (!document.body) return { draw, present: [] };
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
       const t = n as Text;
-      if (t.data.includes('[') && !this.skip(t)) found.push(t);
+      if (!t.data.includes('[')) continue;
+      note(t.data);
+      if (!this.skip(t)) draw.push(t);
     }
-    return found;
+    for (const field of document.querySelectorAll('textarea')) note(field.value);
+    return { draw, present: [...present] };
   }
 
   /** Adjusts the padding after each known placeholder so the line has room for its value. */

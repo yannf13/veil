@@ -1,6 +1,6 @@
 {
   "name": "@veil/extension",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Chrome extension: masks secrets and personal data before they reach ChatGPT, Claude or Gemini, and restores them in the answers.",
   "type": "module",
