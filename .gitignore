@@ -3,5 +3,7 @@ dist/
 *.log
 .DS_Store
 
-# The Claude Code plugin is installed straight from git, so its build is committed.
+# The Claude Code plugin, the Gemini CLI extension and the agent install script run straight
+# from git, so their builds are committed.
 !packages/claude-code/dist/
+!packages/agents/dist/

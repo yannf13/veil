@@ -853,6 +853,9 @@ function auditTotals(log, days = 30, now = /* @__PURE__ */ new Date()) {
 }
 
 // packages/claude-code/src/hook.ts
+import { existsSync as existsSync3, readFileSync as readFileSync3 } from "node:fs";
+
+// packages/claude-code/src/core.ts
 import { chmodSync, existsSync as existsSync2, mkdirSync, readdirSync, readFileSync as readFileSync2, renameSync, rmSync, statSync as statSync2, utimesSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
@@ -971,14 +974,7 @@ function filesChangedInPlace(command, cwd) {
   return [...out];
 }
 
-// packages/claude-code/src/hook.ts
-var MODES = ["session-start", "user-prompt", "prompt-expansion", "pre-tool", "post-tool", "message-display", "session-end"];
-var AGENT_GUIDE = [
-  "Veil is active in this session. It hides secrets and personal data from you: in tool results they appear as placeholders such as [EMAIL_1] or [API_KEY_2]. The user installed Veil on purpose, and sees the real values on their screen.",
-  "- Treat each placeholder as the value itself and use it as-is in files you write, commands you run and replies to the user. Veil puts the real value back just before a file is written or a command runs, then hides it again in the output. A placeholder is never a mistake to fix.",
-  "- Don't try to recover hidden values (no hex or byte dumps, od, xxd, base64, character-by-character reads, or similar), and don't ask the user for them. Veil refuses such commands on files that hold hidden values and withholds output that shows them in another form.",
-  "- To change a file that shows placeholders, rewrite the whole file with the Write tool, keeping the placeholders. Don't use Edit on text that contains a placeholder (the file on disk holds the real value, so Edit can't match it), and don't change such files with shell commands such as sed -i or > redirects: Claude Code then shows you the changed lines without Veil's masking, so Veil refuses those commands."
-].join("\n");
+// packages/claude-code/src/core.ts
 var SKIP_KEYS = /* @__PURE__ */ new Set(["type", "filePath", "file_path", "path", "notebook_path", "base64", "media_type", "mimeType"]);
 var STALE_MS = 30 * 24 * 36e5;
 var veilHome = () => process.env.VEIL_HOME ?? join(homedir(), ".veil");
@@ -1130,6 +1126,45 @@ function answer(command, sessionId, cwd) {
     ...problems.length ? ["  Problems in your rules:", ...problems.map((p) => `    ${p}`)] : []
   ].join("\n");
 }
+function touchVault(path) {
+  if (existsSync2(path)) utimesSync(path, /* @__PURE__ */ new Date(), /* @__PURE__ */ new Date());
+}
+function maskOutput(output, vault, policy) {
+  const findings = [];
+  let withheld = false;
+  const masked = mapStrings(output, (s) => {
+    const result = mask(s, { vault, ...policy.options });
+    findings.push(...result.findings);
+    const leak = encodedLeak(s, vault.entries().map((e) => e.value));
+    if (!leak) return result.text;
+    withheld = true;
+    return `[Veil withheld this output: it shows a hidden value in another form (${leak}). Work with the placeholders as they are.]`;
+  });
+  return { masked, findings, withheld };
+}
+function refusalFor(command, cwd, vault, writeTool = "Write") {
+  if (vault.size === 0) return null;
+  const values = vault.entries().map((e) => e.value);
+  const shown = (files) => files.map((f) => relative(cwd, f) || f).join(", ");
+  const holding = filesHolding(filesIn(command, cwd), values);
+  if (holding.length > 0 && dumpsBytes(command)) {
+    return `Veil: ${shown(holding)} holds values hidden from you, and this command would show them in another form. Treat the placeholders as the values. If the user needs the raw bytes, they can run the command themselves.`;
+  }
+  const edited = filesHolding(filesChangedInPlace(command, cwd), values);
+  if (edited.length > 0) {
+    return `Veil: ${shown(edited)} holds values hidden from you. Change it with the ${writeTool} tool, keeping the placeholders: after a shell command edits a file, you are shown the changed lines without Veil's masking.`;
+  }
+  return null;
+}
+
+// packages/claude-code/src/hook.ts
+var MODES = ["session-start", "user-prompt", "prompt-expansion", "pre-tool", "post-tool", "message-display", "session-end"];
+var AGENT_GUIDE = [
+  "Veil is active in this session. It hides secrets and personal data from you: in tool results they appear as placeholders such as [EMAIL_1] or [API_KEY_2]. The user installed Veil on purpose, and sees the real values on their screen.",
+  "- Treat each placeholder as the value itself and use it as-is in files you write, commands you run and replies to the user. Veil puts the real value back just before a file is written or a command runs, then hides it again in the output. A placeholder is never a mistake to fix.",
+  "- Don't try to recover hidden values (no hex or byte dumps, od, xxd, base64, character-by-character reads, or similar), and don't ask the user for them. Veil refuses such commands on files that hold hidden values and withholds output that shows them in another form.",
+  "- To change a file that shows placeholders, rewrite the whole file with the Write tool, keeping the placeholders. Don't use Edit on text that contains a placeholder (the file on disk holds the real value, so Edit can't match it), and don't change such files with shell commands such as sed -i or > redirects: Claude Code then shows you the changed lines without Veil's masking, so Veil refuses those commands."
+].join("\n");
 var showInstead = (text, event) => ({
   decision: "block",
   reason: text,
@@ -1145,7 +1180,7 @@ function run(mode, input) {
   switch (mode) {
     case "session-start": {
       clearStaleVaults();
-      if (existsSync2(path)) utimesSync(path, /* @__PURE__ */ new Date(), /* @__PURE__ */ new Date());
+      touchVault(path);
       const { problems } = loadPolicy(input.cwd);
       return {
         hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: AGENT_GUIDE },
@@ -1183,48 +1218,28 @@ ${text}`,
       const { policy } = loadPolicy(input.cwd);
       const vault = loadVault(path);
       const before = vault.size;
-      const hidden = [];
-      const masked = mapStrings(input.tool_response, (s) => {
-        const result = mask(s, { vault, ...policy.options });
-        hidden.push(...result.findings);
-        const leak = encodedLeak(s, vault.entries().map((e) => e.value));
-        if (!leak) return result.text;
-        return `[Veil withheld this output: it shows a hidden value in another form (${leak}). Work with the placeholders as they are.]`;
-      });
+      const { masked, findings } = maskOutput(input.tool_response, vault, policy);
       if (masked === input.tool_response) return null;
       if (vault.size !== before) saveVault(path, vault);
-      audit(hidden);
+      audit(findings);
       return { hookSpecificOutput: { hookEventName: "PostToolUse", updatedToolOutput: masked }, suppressOutput: true };
     }
     case "pre-tool": {
-      if (!existsSync2(path)) return null;
+      if (!existsSync3(path)) return null;
       const vault = loadVault(path);
       if (vault.size === 0) return null;
       const restored = mapStrings(input.tool_input, (s) => restore(s, vault));
       const command = typeof restored?.command === "string" ? restored.command : null;
       if (command !== null) {
-        const cwd = input.cwd ?? process.cwd();
-        const values = vault.entries().map((e) => e.value);
-        const shown = (files) => files.map((f) => relative(cwd, f) || f).join(", ");
-        const holding = filesHolding(filesIn(command, cwd), values);
-        if (holding.length > 0 && dumpsBytes(command)) {
-          return deny(
-            `Veil: ${shown(holding)} holds values hidden from you, and this command would show them in another form. Treat the placeholders as the values. If the user needs the raw bytes, they can run the command themselves.`
-          );
-        }
-        const edited = filesHolding(filesChangedInPlace(command, cwd), values);
-        if (edited.length > 0) {
-          return deny(
-            `Veil: ${shown(edited)} holds values hidden from you. Change it with the Write tool, keeping the placeholders: after a shell command edits a file, Claude Code shows you the changed lines without Veil's masking.`
-          );
-        }
+        const refusal = refusalFor(command, input.cwd ?? process.cwd(), vault);
+        if (refusal) return deny(refusal);
       }
       if (restored === input.tool_input) return null;
       return { hookSpecificOutput: { hookEventName: "PreToolUse", updatedInput: restored }, suppressOutput: true };
     }
     case "message-display": {
       const delta = input.delta ?? "";
-      if (!delta.includes("[") || !existsSync2(path) || !loadPolicy(input.cwd).showRealValues) return null;
+      if (!delta.includes("[") || !existsSync3(path) || !loadPolicy(input.cwd).showRealValues) return null;
       const shown = restore(delta, loadVault(path));
       if (shown === delta) return null;
       return { hookSpecificOutput: { hookEventName: "MessageDisplay", displayContent: shown }, suppressOutput: true };
@@ -1242,7 +1257,7 @@ function main() {
   }
   let input = {};
   try {
-    input = JSON.parse(readFileSync2(0, "utf8") || "{}");
+    input = JSON.parse(readFileSync3(0, "utf8") || "{}");
   } catch {
     process.stderr.write("veil: could not read the hook input\n");
     process.exit(1);

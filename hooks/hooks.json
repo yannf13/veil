@@ -1,0 +1,64 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "name": "veil-SessionStart",
+            "command": "node \"${extensionPath}/packages/agents/dist/veil-agent.mjs\" gemini SessionStart",
+            "timeout": 20000
+          }
+        ]
+      }
+    ],
+    "BeforeAgent": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "name": "veil-BeforeAgent",
+            "command": "node \"${extensionPath}/packages/agents/dist/veil-agent.mjs\" gemini BeforeAgent",
+            "timeout": 20000
+          }
+        ]
+      }
+    ],
+    "BeforeModel": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "name": "veil-BeforeModel",
+            "command": "node \"${extensionPath}/packages/agents/dist/veil-agent.mjs\" gemini BeforeModel",
+            "timeout": 20000
+          }
+        ]
+      }
+    ],
+    "BeforeTool": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "name": "veil-BeforeTool",
+            "command": "node \"${extensionPath}/packages/agents/dist/veil-agent.mjs\" gemini BeforeTool",
+            "timeout": 20000
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "name": "veil-AfterTool",
+            "command": "node \"${extensionPath}/packages/agents/dist/veil-agent.mjs\" gemini AfterTool",
+            "timeout": 20000
+          }
+        ]
+      }
+    ]
+  }
+}

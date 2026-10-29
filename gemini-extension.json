@@ -1,0 +1,5 @@
+{
+  "name": "veil",
+  "version": "0.1.0",
+  "description": "Hides secrets and personal data from the model: masks every request and every tool result, and puts real values back when the agent runs a command or writes a file. Everything stays on your machine."
+}
