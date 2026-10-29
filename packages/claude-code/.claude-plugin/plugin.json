@@ -1,8 +1,11 @@
 {
   "name": "veil",
-  "version": "0.1.0",
-  "description": "Hides secrets and personal data from the agent: masks what tools return, puts real values back when files are written or commands run, and stops typed prompts that contain secrets. Everything stays on your machine.",
-  "author": { "name": "Yann" },
+  "version": "0.2.0",
+  "description": "Hides secrets and personal data from the agent: masks what tools return, puts real values back when files are written or commands run, shows you the real values in the agent's replies, and stops typed prompts that contain secrets. Everything stays on your machine.",
+  "author": {
+    "name": "Yann"
+  },
   "repository": "https://github.com/yannf13/veil",
-  "license": "MIT"
+  "license": "MIT",
+  "icon": ".claude-plugin/icon.png"
 }

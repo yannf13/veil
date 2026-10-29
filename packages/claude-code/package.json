@@ -1,6 +1,6 @@
 {
   "name": "@veil/claude-code",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Claude Code plugin: Veil's hooks for prompts, tool input and tool output.",
   "type": "module",
