@@ -25,6 +25,10 @@ const SITES = [
   { name: 'Gemini', kind: 'gemini', url: 'https://gemini.google.com/app', composer: 'rich-textarea .ql-editor', send: 'button.send-button' },
 ] as const;
 
+/** Pages that aren't one of the sites above but are served on their addresses. */
+const REDESIGN = { name: 'Claude after a redesign', kind: 'redesign', url: 'https://claude.ai/redesign', composer: '.input-v2', send: 'button[aria-label="Submit"]' } as const;
+const PAGES = [...SITES, REDESIGN];
+
 // Fake, format-valid key assembled at runtime so secret scanners stay quiet.
 const KEY = 'sk-proj-' + 'aB3dE5fG7hJ9kL2mN4pQ6rS8tU1vW0xYz'.repeat(2);
 const EMAIL = 'jane.doe@example.org';
@@ -51,9 +55,9 @@ beforeAll(async () => {
   if (context.serviceWorkers().length === 0) await context.waitForEvent('serviceworker');
 
   // Serve the three sites from local files; leave everything else (Veil's own frame) alone.
-  const hosts = new Set(SITES.map((s) => new URL(s.url).hostname));
+  const hosts = new Set(PAGES.map((s) => new URL(s.url).hostname));
   await context.route((url) => hosts.has(url.hostname), (route) => {
-    const site = SITES.find((s) => s.url === route.request().url());
+    const site = PAGES.find((s) => s.url === route.request().url());
     if (!site || route.request().resourceType() !== 'document') return route.abort();
     return route.fulfill({
       contentType: 'text/html',
@@ -66,7 +70,7 @@ afterAll(async () => {
   await context?.close();
 });
 
-async function open(site: (typeof SITES)[number]): Promise<Page> {
+async function open(site: (typeof PAGES)[number]): Promise<Page> {
   const page = await context.newPage();
   await page.goto(site.url);
   await page.locator(site.composer).click();
@@ -380,5 +384,233 @@ describe('Veil window', () => {
     await page.waitForTimeout(400);
     expect(await windowHeight(page)).toBe(0);
     await page.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Settings, Undo, the safety net and the toolbar popup
+// ---------------------------------------------------------------------------
+
+const worker = () => context.serviceWorkers()[0]!;
+const extensionId = () => new URL(worker().url()).host;
+
+/** The tab id of a page. Veil has no "tabs" permission, so tabs are found by focus, not by address. */
+async function tabIdOf(page: Page): Promise<number> {
+  await page.bringToFront();
+  const id = await worker().evaluate(async () => (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]?.id);
+  expect(id).toBeDefined();
+  return id!;
+}
+
+async function setUserSettings(settings: object | null): Promise<void> {
+  await worker().evaluate(async (s) => {
+    if (s) await chrome.storage.sync.set({ settings: s });
+    else await chrome.storage.sync.remove('settings');
+  }, settings);
+}
+
+/** Clicks the button in Veil's notice. It sits in a closed shadow root, so only the debugger can find it. */
+async function clickNoticeButton(page: Page): Promise<void> {
+  const cdp = await context.newCDPSession(page);
+  interface DomNode { nodeId: number; nodeName: string; children?: DomNode[]; shadowRoots?: DomNode[] }
+  const find = (node: DomNode, inNotice: boolean): DomNode | null => {
+    const here = inNotice || node.nodeName === 'VEIL-NOTICE';
+    if (here && node.nodeName === 'BUTTON') return node;
+    for (const child of [...(node.shadowRoots ?? []), ...(node.children ?? [])]) {
+      const hit = find(child, here);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  let button: DomNode | null = null;
+  await expect.poll(async () => {
+    const { root } = (await cdp.send('DOM.getDocument', { depth: -1, pierce: true })) as { root: DomNode };
+    button = find(root, false);
+    return button !== null;
+  }).toBe(true);
+  await page.waitForTimeout(250); // the notice fades in
+  const { model } = (await cdp.send('DOM.getBoxModel', { nodeId: button!.nodeId })) as { model: { content: number[] } };
+  const [x1, y1, , , x3, y3] = model.content as [number, number, number, number, number, number];
+  await page.mouse.click((x1 + x3) / 2, (y1 + y3) / 2);
+  await cdp.detach();
+}
+
+describe('Undo', () => {
+  for (const site of [SITES[0], SITES[1]]) {
+    it(`puts the text back and lets that one message through (${site.name})`, async () => {
+      const page = await open(site);
+      await page.keyboard.type(`Mail ${EMAIL} now`);
+      await page.keyboard.press('Enter');
+      await expect.poll(() => composerText(page)).toContain('[EMAIL_');
+      await clickNoticeButton(page);
+      await expect.poll(() => composerText(page)).toBe(`Mail ${EMAIL} now`);
+      await page.locator(site.composer).click();
+      await page.keyboard.press('End');
+      await page.keyboard.press('Enter');
+      await expect.poll(() => sent(page)).toEqual([`Mail ${EMAIL} now`]);
+      // Only that one: the next message is checked again.
+      await page.keyboard.type(`Again ${EMAIL}`);
+      await page.keyboard.press('Enter');
+      await expect.poll(() => composerText(page)).toContain('[EMAIL_');
+      expect(await sent(page)).toHaveLength(1);
+      await page.close();
+    });
+  }
+});
+
+describe('your settings', () => {
+  afterAll(() => setUserSettings(null));
+
+  it('switched off on a site: messages go through unchecked', async () => {
+    await setUserSettings({ off: ['chatgpt.com'], disabled: [], allow: [], patterns: [] });
+    const page = await open(SITES[0]);
+    await page.keyboard.type(`Mail ${EMAIL}`);
+    await page.keyboard.press('Enter');
+    await expect.poll(() => sent(page)).toEqual([`Mail ${EMAIL}`]);
+    await page.close();
+    // Other sites stay protected.
+    const other = await open(SITES[2]);
+    await other.keyboard.type(`Mail ${EMAIL}`);
+    await other.keyboard.press('Enter');
+    await expect.poll(() => composerText(other)).toContain('[EMAIL_');
+    await other.close();
+  });
+
+  it('keeps allowed values visible and hides your own patterns', async () => {
+    await setUserSettings({ off: [], disabled: [], allow: [EMAIL], patterns: [{ type: 'PROJECT', pattern: 'PRJ-\\d{4}' }] });
+    const page = await open(SITES[0]);
+    await page.keyboard.type(`Mail ${EMAIL} about PRJ-1234 and bob@example.org`);
+    await page.keyboard.press('Enter');
+    await expect.poll(() => composerText(page)).toMatch(/^Mail jane\.doe@example\.org about \[PROJECT_1\] and \[EMAIL_\d+\]$/);
+    await page.close();
+  });
+
+  it('applies changes to open tabs right away', async () => {
+    await setUserSettings(null);
+    const page = await open(SITES[0]);
+    await setUserSettings({ off: [], disabled: ['EMAIL'], allow: [], patterns: [] });
+    await page.waitForTimeout(200);
+    await page.keyboard.type(`Mail ${EMAIL}`);
+    await page.keyboard.press('Enter');
+    await expect.poll(() => sent(page)).toEqual([`Mail ${EMAIL}`]);
+    await page.close();
+  });
+});
+
+describe('names and addresses', () => {
+  it('hides a name and a postal address typed in the message box', async () => {
+    const page = await open(SITES[2]);
+    await page.keyboard.type('Write a letter to Jane Doe, 12 rue de la Paix, 75002 Paris.');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => composerText(page)).toBe('Write a letter to [NAME_1], [ADDRESS_1].');
+    await page.close();
+  });
+});
+
+describe('safety net for site redesigns', () => {
+  it('still masks on Enter in a message box it has no selector for', async () => {
+    const page = await open(REDESIGN);
+    await page.keyboard.type(`Mail ${EMAIL}`);
+    await page.keyboard.press('Enter');
+    await expect.poll(() => composerText(page)).toMatch(/^Mail \[EMAIL_\d+\]$/);
+    await page.waitForTimeout(300);
+    expect(await sent(page)).toEqual([]);
+    await page.keyboard.press('Enter');
+    await expect.poll(() => sent(page)).toEqual([expect.stringMatching(/^Mail \[EMAIL_\d+\]$/)]);
+    await page.close();
+  });
+
+  it('still masks when an unknown send button is clicked', async () => {
+    const page = await open(REDESIGN);
+    await page.keyboard.type(`Key ${KEY}`);
+    await page.locator(REDESIGN.send).click();
+    await expect.poll(() => composerText(page)).toMatch(/^Key \[API_KEY_\d+\]$/);
+    expect(await sent(page)).toEqual([]);
+    await page.close();
+  });
+
+  it('warns on the toolbar icon when it finds no message box at all', async () => {
+    const page = await context.newPage();
+    await page.goto(REDESIGN.url);
+    await page.evaluate(() => document.querySelector('.input-v2')?.remove());
+    const tabId = await tabIdOf(page);
+    await expect
+      .poll(() => worker().evaluate((id) => chrome.action.getBadgeText({ tabId: id }), tabId), { timeout: 12_000 })
+      .toBe('!');
+    await page.close();
+  });
+});
+
+describe('extension frames', () => {
+  it("can't be probed by the page, so a site can't tell Veil is installed until Veil shows something", async () => {
+    const page = await open(SITES[0]);
+    const probe = (file: string) =>
+      page.evaluate((u) => fetch(u).then(() => 'open', () => 'closed'), `chrome-extension://${extensionId()}/${file}`);
+    for (const file of ['overlay.html', 'panel.html', 'panel.js']) expect(await probe(file)).toBe('closed');
+    // Veil's own frames still load.
+    await page.keyboard.type(`Mail ${EMAIL}`);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(300);
+    await page.keyboard.press('Enter');
+    const frame = await overlay(page);
+    await expect.poll(async () => (await shownValues(frame)).length).toBe(2);
+    await page.close();
+  });
+});
+
+describe('toolbar popup', () => {
+  afterAll(() => setUserSettings(null));
+
+  async function openPopupFor(site: (typeof PAGES)[number]): Promise<{ page: Page; popup: Page }> {
+    const page = await open(site);
+    const tabId = await tabIdOf(page);
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId()}/popup.html#tab=${tabId}`);
+    return { page, popup };
+  }
+
+  it('shows the page status and what was hidden, and switches Veil off for the site', async () => {
+    await setUserSettings(null);
+    await worker().evaluate(() => chrome.storage.local.remove('audit'));
+    const { page, popup } = await openPopupFor(SITES[0]);
+    await page.bringToFront();
+    await page.keyboard.type(`Mail ${EMAIL} and ${KEY}`);
+    await page.keyboard.press('Enter');
+    await expect.poll(() => composerText(page)).toContain('[API_KEY_');
+    await popup.reload();
+    await expect.poll(() => popup.locator('#site-line').innerText()).toMatch(/^On for ChatGPT · 2 hidden values on this page$/);
+    await expect.poll(() => popup.locator('#audit').innerText()).toBe('1 email address and 1 API key.');
+    // The audit log holds counts only.
+    const audit = await worker().evaluate(() => chrome.storage.local.get('audit'));
+    expect(JSON.stringify(audit)).not.toContain('jane');
+    expect(JSON.stringify(audit)).not.toContain('sk-');
+
+    await popup.getByLabel('Veil on this site').click({ force: true });
+    await expect.poll(() => popup.locator('#site-line').innerText()).toMatch(/^Off for ChatGPT/);
+    expect(await worker().evaluate(async () => (await chrome.storage.sync.get('settings')).settings.off)).toEqual(['chatgpt.com']);
+    await page.close();
+    await popup.close();
+  });
+
+  it('saves your rules and the kinds to hide, and explains mistakes', async () => {
+    await setUserSettings(null);
+    const { page, popup } = await openPopupFor(SITES[0]);
+    await popup.getByLabel('Names').uncheck();
+    await popup.locator('#allow').fill('support@acme.com\n*@example.net');
+    await popup.locator('#patterns').fill('PROJECT PRJ-\\d{4}\nTICKET (');
+    await popup.getByRole('button', { name: 'Save rules' }).click();
+    await expect.poll(() => popup.locator('#problems').innerText()).toContain('TICKET');
+    await popup.locator('#patterns').fill('PROJECT PRJ-\\d{4}');
+    await popup.getByRole('button', { name: 'Save rules' }).click();
+    await expect.poll(() => popup.locator('#saved').innerText()).toBe('Saved');
+    const saved = await worker().evaluate(async () => (await chrome.storage.sync.get('settings')).settings);
+    expect(saved).toEqual({
+      off: [],
+      disabled: ['NAME'],
+      allow: ['support@acme.com', '*@example.net'],
+      patterns: [{ type: 'PROJECT', pattern: 'PRJ-\\d{4}' }],
+    });
+    await page.close();
+    await popup.close();
   });
 });

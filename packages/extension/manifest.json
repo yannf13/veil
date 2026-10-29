@@ -1,9 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Veil",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Hides secrets and personal data from ChatGPT, Claude and Gemini, and shows them back to you in the answers. Everything stays on your device.",
   "permissions": ["storage"],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "background": {
     "service_worker": "background.js"
   },
@@ -11,16 +17,25 @@
     {
       "matches": ["https://chatgpt.com/*", "https://claude.ai/*", "https://gemini.google.com/*"],
       "js": ["content.js"],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [
     {
       "resources": ["overlay.html", "overlay.js", "panel.html", "panel.js"],
-      "matches": ["https://chatgpt.com/*", "https://claude.ai/*", "https://gemini.google.com/*"]
+      "matches": ["https://chatgpt.com/*", "https://claude.ai/*", "https://gemini.google.com/*"],
+      "use_dynamic_url": true
     }
   ],
   "action": {
-    "default_title": "Veil is protecting ChatGPT, Claude and Gemini"
+    "default_title": "Veil",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "storage": {
+    "managed_schema": "managed_schema.json"
   }
 }

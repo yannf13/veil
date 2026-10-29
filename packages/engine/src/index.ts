@@ -1,5 +1,11 @@
 export { detect, findPlaceholders, mask, restore, Vault } from './engine.js';
 export type { DetectOptions, MaskOptions, MaskResult, PlaceholderMatch, VaultEntry } from './engine.js';
 export { DEFAULT_DETECTORS } from './detectors.js';
-export type { Detector, EntityType, Finding } from './types.js';
+export { describeCounts, describeFindings, labelFor, LABELS, tally } from './describe.js';
+export type { Labels } from './describe.js';
+export { BUILTIN_TYPES, compilePolicy } from './policy.js';
+export type { CustomPattern, Policy, PolicyConfig } from './policy.js';
+export { auditTotals, dayOf, recordAudit } from './audit.js';
+export type { AuditLog } from './audit.js';
+export type { BuiltinEntityType, Detector, EntityType, Finding } from './types.js';
 export { ibanValid, luhnValid, shannonEntropy } from './validators.js';

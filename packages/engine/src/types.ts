@@ -1,5 +1,5 @@
-/** Kinds of sensitive values the engine can find. Each kind gets its own placeholder prefix, e.g. [EMAIL_1]. */
-export type EntityType =
+/** Kinds of sensitive values the built-in rules find. Each kind gets its own placeholder prefix, e.g. [EMAIL_1]. */
+export type BuiltinEntityType =
   | 'EMAIL'
   | 'PHONE'
   | 'IBAN'
@@ -8,7 +8,15 @@ export type EntityType =
   | 'API_KEY'
   | 'PRIVATE_KEY'
   | 'JWT'
-  | 'SECRET';
+  | 'SECRET'
+  | 'NAME'
+  | 'ADDRESS';
+
+/**
+ * A built-in kind, or one defined by a custom pattern (uppercase letters and underscores, e.g. PROJECT_CODE).
+ * The `string & {}` keeps editor completion for the built-in kinds.
+ */
+export type EntityType = BuiltinEntityType | (string & {});
 
 /** One sensitive value found in a text. Offsets are UTF-16 indices, `end` exclusive. */
 export interface Finding {

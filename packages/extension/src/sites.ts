@@ -40,7 +40,36 @@ const SITES: Record<string, Site> = {
 };
 
 /** Words that mean "send" in the languages people use these sites in, for buttons we can't match otherwise. */
-const SEND_LABEL = /(send|envoyer|senden|enviar|invia|verzenden|wyślij)/i;
+const SEND_LABEL = /(send|submit|envoyer|senden|enviar|invia|verzenden|wyślij|отправ|发送|送信)/i;
+
+const EDITABLE = 'textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]';
+
+/**
+ * The editable box `target` is in, whatever the site's markup: the safety net for redesigns that
+ * break the selectors above. One-line inputs are left out (search boxes, sign-in forms).
+ */
+export function editableOf(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof Element)) return null;
+  let el = target.closest<HTMLElement>(EDITABLE);
+  if (!el) return null;
+  // The editing host is the outermost editable element.
+  for (let up = el.parentElement?.closest<HTMLElement>(EDITABLE); up; up = up.parentElement?.closest<HTMLElement>(EDITABLE)) el = up;
+  return el;
+}
+
+/** A button that reads as "send" (by label, title or type) and sits next to the given box. */
+export function looksLikeSendFor(target: EventTarget | null, box: HTMLElement | null): boolean {
+  if (!(target instanceof Element) || !box?.isConnected) return false;
+  const button = target.closest<HTMLElement>('button, [role="button"]');
+  if (!button || box.contains(button)) return false;
+  const label = [button.getAttribute('aria-label'), button.getAttribute('title'), button.textContent].join(' ');
+  const isSubmit = button instanceof HTMLButtonElement && button.type === 'submit' && !!button.form;
+  if (!isSubmit && !SEND_LABEL.test(label)) return false;
+  // Next to the box: they share an ancestor a few levels up, as a composer and its send button do.
+  let shared: Element | null = box;
+  for (let i = 0; i < 6 && shared; i++, shared = shared.parentElement) if (shared.contains(button)) return true;
+  return false;
+}
 
 export function siteFor(hostname: string): Site | undefined {
   return SITES[hostname.replace(/^www\./, '')];

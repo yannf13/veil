@@ -100,6 +100,17 @@ describe('secrets in assignments and prose', () => {
     'password: ********',
     'max_tokens = 4096',
     'secret_name = config.secretName',
+    'token = line[1]',
+    'self.token = nextchar',
+    'proxy_passwd = unquote(proxy_passwd)',
+    'private_key: SSHPrivateKeyTypes, password: bytes',
+    'self.next_token: Optional[Token] = None',
+    "default_token='Bearer'",
+    'key_password=certs[0][2],',
+    'Username="%s", PasswordDigest="%s"',
+    'Scrypt is a password-based key derivation function for password-protected files.',
+    "{':action': 'password_reset'}",
+    'socks5h://<username>:<password>@proxy-host',
   ])('leaves references and placeholders alone: %s', (line) => {
     expect(found(line)).toEqual([]);
   });
@@ -109,6 +120,10 @@ describe('secrets in assignments and prose', () => {
     ['Das Passwort ist Saar-2026', 'Saar-2026'],
   ])('finds a password written in prose: %s', (text, secret) => {
     expect(found(text)).toEqual([['SECRET', secret]]);
+  });
+  it('finds unquoted literals in YAML and .env files', () => {
+    expect(found('db:\n  password: Soleil2024\n')).toEqual([['SECRET', 'Soleil2024']]);
+    expect(found('export API_TOKEN=abcdefghijk')).toEqual([['SECRET', 'abcdefghijk']]);
   });
   it('ignores ordinary sentences about passwords', () => {
     expect(found('A password is required. Reset your password tomorrow.')).toEqual([]);
@@ -126,8 +141,40 @@ describe('high-entropy tokens', () => {
       'id 123e4567-e89b-12d3-a456-426614174000',
       'call handleUserProfileUpdateRequest2024 now',
       'see src/components/UserProfileCard2.tsx',
+      'docs https://developer.mozilla.org/docs/Web/API/CanvasRenderingContext2D/fillStyle',
+      'https://github.com/python/cpython/blob/785cc6770588de087d09e89a69110af2542be208/Lib/sysconfig.py',
+      'res = backend._lib.EVP_PKEY_CTX_set_rsa_mgf1_md(pkey_ctx)',
+      'pin-sha256="K87oWBWM9UZfyddvDfoxL+8lpNyoUB2ptGtn0fv6G2Q="',
     ].join('\n');
     expect(found(text)).toEqual([]);
+  });
+  it('still finds a random key inside a URL path, such as a webhook', () => {
+    const key = fakeToken(32);
+    expect(found(`POST https://hooks.example.com/services/T0AB/B0CD/${key}`)).toEqual([['SECRET', expect.stringContaining(key)]]);
+  });
+  it('keeps "=" padding with the token but not a parameter name before it', () => {
+    const token = fakeToken(30);
+    expect(found(`code_challenge=${token}`)).toEqual([['SECRET', token]]);
+  });
+});
+
+describe('numbers that only look like IPs or phones', () => {
+  it.each([
+    'See RFC 4291 2.5.5.2 and section 13.2.5.33.',
+    'v8: 11.3.244.8-node.9',
+    'NAME = ObjectIdentifier("2.5.4.3")',
+    "s.addMembership('224.0.0.114')",
+    'FOREGROUND_BLUE 0x0001 -- 0000 0001',
+    '<Buffer 04 03 02 01 08 07 06 05>',
+    "list('-+0123456789.')",
+  ])('%s', (text) => {
+    expect(found(text)).toEqual([]);
+  });
+  it('still finds real ones', () => {
+    expect(found('server 192.168.1.20, call 06 12 34 56 78')).toEqual([
+      ['IP', '192.168.1.20'],
+      ['PHONE', '06 12 34 56 78'],
+    ]);
   });
 });
 

@@ -6,6 +6,8 @@ export interface DetectOptions {
   detectors?: readonly Detector[];
   /** Only report these kinds; defaults to all. */
   types?: readonly EntityType[];
+  /** Return true to leave a finding visible (an allowlist). Checked after overlaps are settled. */
+  allow?: (finding: Finding) => boolean;
 }
 
 /**
@@ -28,7 +30,8 @@ export function detect(text: string, options: DetectOptions = {}): Finding[] {
   for (const { f } of candidates) {
     if (!chosen.some((c) => f.start < c.end && c.start < f.end)) chosen.push(f);
   }
-  return chosen.sort((a, b) => a.start - b.start);
+  const kept = options.allow ? chosen.filter((f) => !options.allow!(f)) : chosen;
+  return kept.sort((a, b) => a.start - b.start);
 }
 
 export interface VaultEntry {

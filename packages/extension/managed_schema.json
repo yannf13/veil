@@ -1,0 +1,39 @@
+{
+  "type": "object",
+  "properties": {
+    "disabled": {
+      "title": "Kinds Veil leaves alone",
+      "description": "Built-in kinds not to hide, e.g. NAME or IP. People can't turn these back on.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "allow": {
+      "title": "Values that stay visible",
+      "description": "Exact text (any case), a wildcard such as *@yourcompany.com, or a regular expression written as /.../flags.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "patterns": {
+      "title": "Extra things to hide",
+      "description": "Company-specific values such as project codes or customer IDs.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "description": "Placeholder name: capitals and underscores, e.g. PROJECT_CODE." },
+          "pattern": { "type": "string", "description": "JavaScript regular expression, without slashes." },
+          "flags": { "type": "string" },
+          "group": { "type": "integer" },
+          "label": { "type": "array", "items": { "type": "string" } },
+          "priority": { "type": "integer" },
+          "name": { "type": "string" }
+        }
+      }
+    },
+    "allowTurningOff": {
+      "title": "Let people switch Veil off",
+      "description": "When false, people can't switch Veil off on a site or stop it hiding a kind.",
+      "type": "boolean"
+    }
+  }
+}

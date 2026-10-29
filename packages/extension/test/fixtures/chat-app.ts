@@ -10,7 +10,7 @@ import { EditorState } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import Quill from 'quill';
 
-type Kind = 'chatgpt' | 'chatgpt-textarea' | 'claude' | 'gemini';
+type Kind = 'chatgpt' | 'chatgpt-textarea' | 'claude' | 'gemini' | 'redesign';
 
 declare global {
   interface Window {
@@ -63,7 +63,29 @@ function send(): void {
   }, 30);
 }
 
-if (kind === 'chatgpt-textarea') {
+if (kind === 'redesign') {
+  // A site after a redesign Veil's selectors don't know: a bare contenteditable outside any form,
+  // and an icon button labelled "Submit". Only the safety net can catch this one.
+  form.remove();
+  const bar = document.createElement('div');
+  bar.className = 'composer-v2';
+  const box = document.createElement('div');
+  box.contentEditable = 'true';
+  box.className = 'input-v2';
+  box.style.cssText = 'min-height: 40px; border: 1px solid #ccc; white-space: pre-wrap';
+  button.setAttribute('aria-label', 'Submit');
+  button.textContent = '↑';
+  bar.append(box, button);
+  main.append(bar);
+  box.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  });
+  getText = () => box.innerText.replace(/\n$/, '');
+  clear = () => (box.textContent = '');
+} else if (kind === 'chatgpt-textarea') {
   // Logged-out ChatGPT as seen live in Oct 2026: a plain textarea in a form, a submit button
   // labelled in the UI language, and framework state that only changes on input events.
   const area = document.createElement('textarea');
