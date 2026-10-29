@@ -4,19 +4,19 @@ One local privacy layer for every AI tool. Veil masks secrets and personal data 
 
 | Package | What it is | Status |
 | --- | --- | --- |
-| [`packages/engine`](packages/engine) | Detection, masking and restoring; zero dependencies | v0.1, 61 tests |
-| [`packages/extension`](packages/extension) | Chrome extension for ChatGPT, Claude and Gemini; real values shown only in frames the site can't read, plus a Veil window with Copy buttons | v0.3, 22 end-to-end tests in Chromium; [install](packages/extension/README.md) |
-| [`packages/claude-code`](packages/claude-code) | Claude Code plugin: masks what tools return, restores values when files are written or commands run, blocks typed prompts with secrets | v0.1, 11 unit tests + runs in real Claude Code; install with `/plugin marketplace add yannf13/veil` |
-| Other coding agents | Codex, Cursor, Gemini CLI | Next |
+| [`packages/engine`](packages/engine) | Detection, masking, restoring, rules and a values-free audit log; zero dependencies | v0.2, 147 tests |
+| [`packages/extension`](packages/extension) | Chrome extension for ChatGPT, Claude and Gemini: masks on send, real values shown only in frames the site can't read, Veil window, Undo, toolbar popup with your rules, Chrome policy for organizations | v0.4, 37 end-to-end tests in Chromium; [install](packages/extension/README.md) |
+| [`packages/claude-code`](packages/claude-code) | Claude Code plugin: masks what tools return, restores values when files are written or commands run, shows you real values in replies, refuses byte dumps and in-place edits of files with hidden values, stops typed prompts with secrets | v0.2, 42 unit tests + runs in real Claude Code; `/plugin marketplace add yannf13/veil` |
+| [`packages/agents`](packages/agents) | Codex CLI, Gemini CLI and Cursor, through each tool's hooks | v0.1, 13 unit tests; Codex and Gemini CLI run end to end against local stand-ins for their APIs; [install](packages/agents/README.md) |
 
-**Claude Code hooks, checked in version 2.1.312 (Oct 2026):** a `UserPromptSubmit` hook can block a typed prompt but cannot rewrite it. Tool hooks can rewrite: `PostToolUse` → `updatedToolOutput` replaces what the agent reads from any tool (same shape as the tool's output), and `PreToolUse` → `updatedInput` changes tool input before it runs. Details and the limits found in real runs are in the [plugin README](packages/claude-code/README.md).
+One set of rules for all of them: `~/.veil/config.json` (yours) and `.veil.json` in a repository (your team's) for the agents, the popup and Chrome policy for the extension. Same format everywhere: kinds to leave alone, values that stay visible, extra patterns to hide.
 
 ## packages/engine
 
 Zero runtime dependencies, so the same code runs in a browser extension and in Node-based agent hooks.
 
 ```ts
-import { mask, restore, Vault } from '@veil/engine';
+import { compilePolicy, mask, restore, Vault } from '@veil/engine';
 
 const vault = new Vault(); // one per conversation, never leaves the device
 const { text } = mask('Mail jane.doe@example.org, IBAN DE89 3704 0044 0532 0130 00', { vault });
@@ -24,20 +24,27 @@ const { text } = mask('Mail jane.doe@example.org, IBAN DE89 3704 0044 0532 0130 
 
 restore('I wrote to [EMAIL_1].', vault);
 // 'I wrote to jane.doe@example.org.'
+
+// Your rules on top of the built-ins; mistakes come back in policy.problems, never thrown.
+const policy = compilePolicy({ disabled: ['NAME'], allow: ['*@acme.com'], patterns: [{ type: 'TICKET', pattern: 'SEC-\\d+' }] });
+mask('SEC-42 from bob@acme.com', { vault, ...policy.options }).text;
+// '[TICKET_1] from bob@acme.com'
 ```
 
-**What it finds today**
+**What it finds**
 
 | Kind | How |
 | --- | --- |
 | API keys | Known formats: Anthropic, OpenAI, Stripe, GitHub, GitLab, AWS, Google, Slack, Hugging Face |
 | Private keys, JWTs | Block and token shape |
-| Secrets | Passwords in connection strings, values assigned to secret-named keys, passwords written in prose (EN, FR, DE), unknown high-entropy tokens |
+| Secrets | Passwords in connection strings, values assigned to secret-named keys (quoted, or in .env and YAML style), passwords written in prose (EN, FR, DE), unknown random-looking tokens |
 | IBANs | Country length + mod-97 checksum |
 | Payment cards | Issuer prefix + Luhn checksum |
 | Emails, phones, IPv4 | Patterns; phones for international, FR, DE and US formats |
+| Names | A known first name followed by a surname, or any name after a title, greeting, sign-off, "my name is" or a form label; 6,700 first names from 12 locales |
+| Postal addresses | French, German, US and UK formats, PO boxes |
 
-**Not yet:** names, postal addresses and other free-text personal data. Those need the small on-device model (next step). The vault is in memory only; encryption at rest comes with the browser extension.
+False positives are measured on 47 MB of ordinary code, docs and licenses (`scripts/false-positives.ts`): code expressions, variable names, versions, paths, URL paths, section numbers, OIDs, byte lists and documentation IP ranges are left alone. A small on-device model for names in more languages is compared in the concept doc; none is shipped.
 
 **Design choices**
 
@@ -51,8 +58,8 @@ restore('I wrote to [EMAIL_1].', vault);
 
 ```bash
 npm install
-npm test         # engine tests + extension end-to-end tests (needs Playwright's Chromium)
-npm run build    # engine to dist/, extension to packages/extension/dist
+npm test         # all packages: engine, extension end-to-end (needs Playwright's Chromium), Claude Code, agents
+npm run build    # engine to dist/, extension to packages/extension/dist, the two hook bundles
 npm run demo     # masks a sample prompt and restores a sample answer
 npm run typecheck
 ```
