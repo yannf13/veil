@@ -65,3 +65,7 @@ npm run typecheck
 ```
 
 Test secrets are assembled at runtime from a fake alphabet, so no real-looking key is committed and secret scanners stay quiet.
+
+## License
+
+[MIT](LICENSE): use, change and share it freely, including commercially, as long as the copyright notice stays.
